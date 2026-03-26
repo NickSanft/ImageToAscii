@@ -1,0 +1,6 @@
+Pillow
+rembg
+numpy
+fastapi
+uvicorn
+python-multipart
