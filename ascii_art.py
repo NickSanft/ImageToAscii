@@ -5,15 +5,16 @@ Converts an image to ASCII art, with optional background removal to isolate
 the subject before conversion.
 
 Usage:
-    python tools/ascii_art.py <image> [options]
+    python ascii_art.py <image> [options]
 
 Requirements (Python 3.12):
     pip install Pillow rembg
+    pip install numpy  # optional, required for --dither
 """
 
 import argparse
 import sys
-import os
+import re
 from pathlib import Path
 
 
@@ -71,6 +72,10 @@ def image_to_ascii(
     char_set: str = "standard",
     invert: bool = False,
     color: bool = False,
+    contrast: bool = False,
+    sharpen: float = 1.0,
+    gamma: float = 1.0,
+    dither: bool = False,
 ) -> str:
     """
     Convert a PIL image to an ASCII string.
@@ -80,55 +85,95 @@ def image_to_ascii(
         width:     number of characters per line
         char_set:  key into CHAR_SETS
         invert:    invert brightness (useful for dark subjects on white bg)
-        color:     wrap each character in ANSI 256-color escape codes
+        color:     wrap each character in ANSI 24-bit color escape codes
+        contrast:  auto-stretch the grayscale histogram for maximum tonal range
+        sharpen:   sharpness multiplier applied after resize (1.0 = no change)
+        gamma:     brightness gamma before char mapping (< 1.0 = brighter midtones)
+        dither:    use Floyd-Steinberg dithering to simulate intermediate tones
 
     Returns:
         Multi-line ASCII string (with ANSI codes if color=True)
     """
-    from PIL import Image
+    from PIL import Image, ImageEnhance, ImageOps
 
     chars = CHAR_SETS.get(char_set, CHAR_SETS["standard"])
 
     # Resize: terminal characters are ~0.5 wide as they are tall,
-    # so we double the height scaling to keep proportions correct.
+    # so we scale height down to keep proportions correct.
     aspect = img.height / img.width
     height = max(1, int(width * aspect * 0.45))
     img_resized = img.resize((width, height), Image.LANCZOS)
 
-    # Work in RGB for color, then also derive grayscale
+    # Sharpen after resize to recover edge detail lost during downscaling
+    if sharpen != 1.0:
+        img_resized = ImageEnhance.Sharpness(img_resized).enhance(sharpen)
+
     rgb = img_resized.convert("RGB")
     gray = img_resized.convert("L")
 
+    # Stretch histogram so the full character range is used
+    if contrast:
+        gray = ImageOps.autocontrast(gray, cutoff=2)
+
+    if invert:
+        gray = ImageOps.invert(gray)
+
+    n = len(chars) - 1
+
+    # Floyd-Steinberg dithering — distributes quantization error to neighbours,
+    # giving the illusion of more tones than the character set can represent.
+    if dither:
+        try:
+            import numpy as np
+            gray_arr = np.array(gray, dtype=float)
+            lines = []
+            for y in range(height):
+                row = []
+                for x in range(width):
+                    val = float(np.clip(gray_arr[y, x], 0, 255))
+                    normalized = (val / 255.0) ** gamma
+                    idx = max(0, min(n, int(normalized * n)))
+                    ch = chars[idx]
+                    quant_error = val - (idx / n * 255.0)
+                    if x + 1 < width:
+                        gray_arr[y, x + 1] += quant_error * 7 / 16
+                    if y + 1 < height:
+                        if x > 0:
+                            gray_arr[y + 1, x - 1] += quant_error * 3 / 16
+                        gray_arr[y + 1, x] += quant_error * 5 / 16
+                        if x + 1 < width:
+                            gray_arr[y + 1, x + 1] += quant_error * 1 / 16
+                    if color:
+                        r, g, b = rgb.getpixel((x, y))
+                        row.append(f"\033[38;2;{r};{g};{b}m{ch}")
+                    else:
+                        row.append(ch)
+                lines.append("".join(row) + "\033[0m" if color else "".join(row))
+            return "\n".join(lines)
+        except ImportError:
+            print("Warning: numpy not installed; --dither requires numpy (pip install numpy).", file=sys.stderr)
+
+    # Standard brightness mapping with optional gamma correction
     lines = []
     for y in range(height):
         row = []
         for x in range(width):
-            brightness = gray.getpixel((x, y))  # 0=black, 255=white
-            if invert:
-                brightness = 255 - brightness
-
-            # Map brightness to character index
-            idx = int(brightness / 255 * (len(chars) - 1))
+            brightness = gray.getpixel((x, y))
+            normalized = (brightness / 255.0) ** gamma
+            idx = max(0, min(n, int(normalized * n)))
             ch = chars[idx]
-
             if color:
                 r, g, b = rgb.getpixel((x, y))
-                # ANSI 24-bit foreground color
                 row.append(f"\033[38;2;{r};{g};{b}m{ch}")
             else:
                 row.append(ch)
-
-        if color:
-            lines.append("".join(row) + "\033[0m")
-        else:
-            lines.append("".join(row))
+        lines.append("".join(row) + "\033[0m" if color else "".join(row))
 
     return "\n".join(lines)
 
 
 def strip_ansi(text: str) -> str:
     """Remove ANSI escape codes from a string (for saving to file)."""
-    import re
     return re.sub(r"\033\[[0-9;]*m", "", text)
 
 
@@ -165,6 +210,30 @@ def main():
         help="Use ANSI 24-bit color codes in terminal output",
     )
     parser.add_argument(
+        "--contrast",
+        action="store_true",
+        help="Auto-stretch the grayscale histogram to maximize tonal range",
+    )
+    parser.add_argument(
+        "--sharpen",
+        type=float,
+        default=1.0,
+        metavar="FACTOR",
+        help="Sharpness factor applied after resize (1.0 = unchanged, 2.0 = sharper)",
+    )
+    parser.add_argument(
+        "--gamma",
+        type=float,
+        default=1.0,
+        metavar="GAMMA",
+        help="Brightness gamma before char mapping (< 1.0 brightens midtones, > 1.0 darkens; default: 1.0)",
+    )
+    parser.add_argument(
+        "--dither",
+        action="store_true",
+        help="Apply Floyd-Steinberg dithering for smoother tonal gradients (requires numpy)",
+    )
+    parser.add_argument(
         "--output", "-o",
         help="Save ASCII art to file (ANSI codes stripped automatically)",
     )
@@ -183,6 +252,10 @@ def main():
         char_set=args.chars,
         invert=args.invert,
         color=args.color,
+        contrast=args.contrast,
+        sharpen=args.sharpen,
+        gamma=args.gamma,
+        dither=args.dither,
     )
 
     # Print to terminal
