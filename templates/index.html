@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Image → ASCII</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            background: #1a1a1a;
+            color: #e0e0e0;
+            font-family: system-ui, -apple-system, sans-serif;
+            font-size: 14px;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ── Controls panel ── */
+        #controls {
+            width: 260px;
+            min-width: 260px;
+            background: #222;
+            border-right: 1px solid #2e2e2e;
+            padding: 16px 14px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        #controls h1 {
+            font-size: 15px;
+            font-weight: 600;
+            color: #fff;
+            letter-spacing: 0.02em;
+        }
+
+        .section { display: flex; flex-direction: column; gap: 10px; }
+
+        .section-title {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #555;
+        }
+
+        /* Upload drop zone */
+        #upload-area {
+            border: 2px dashed #3a3a3a;
+            border-radius: 6px;
+            padding: 18px 12px;
+            text-align: center;
+            cursor: pointer;
+            color: #666;
+            font-size: 12px;
+            line-height: 1.5;
+            transition: border-color 0.15s, background 0.15s, color 0.15s;
+            user-select: none;
+        }
+        #upload-area:hover, #upload-area.dragover {
+            border-color: #4d8fc9;
+            background: rgba(77,143,201,0.06);
+            color: #aaa;
+        }
+        #upload-area.has-file {
+            border-color: #3a9e6e;
+            color: #3a9e6e;
+        }
+        #file-input { display: none; }
+
+        /* Sliders */
+        .slider-label {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            color: #bbb;
+            font-size: 13px;
+        }
+        .slider-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+        .slider-row span { font-size: 13px; }
+        .slider-val {
+            font-size: 12px;
+            color: #777;
+            font-variant-numeric: tabular-nums;
+            min-width: 32px;
+            text-align: right;
+        }
+        input[type="range"] {
+            width: 100%;
+            accent-color: #4d8fc9;
+            cursor: pointer;
+            height: 4px;
+        }
+
+        /* Select */
+        select {
+            background: #2c2c2c;
+            color: #ddd;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            padding: 5px 8px;
+            font-size: 13px;
+            cursor: pointer;
+            width: 100%;
+        }
+        select:focus { outline: none; border-color: #4d8fc9; }
+
+        /* Checkboxes */
+        .check-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            color: #bbb;
+            font-size: 13px;
+            user-select: none;
+        }
+        .check-row input[type="checkbox"] {
+            accent-color: #4d8fc9;
+            width: 13px;
+            height: 13px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .check-row .note {
+            color: #555;
+            font-size: 11px;
+        }
+
+        /* Buttons */
+        .btn {
+            background: #2c2c2c;
+            color: #ddd;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            padding: 7px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.12s, border-color 0.12s;
+            width: 100%;
+        }
+        .btn:hover:not(:disabled) { background: #363636; border-color: #4a4a4a; }
+        .btn:disabled { opacity: 0.35; cursor: default; }
+        .btn-save {
+            background: #1e4a72;
+            border-color: #2a65a0;
+            color: #c8dff2;
+        }
+        .btn-save:hover:not(:disabled) { background: #235585; }
+
+        /* ── Preview panel ── */
+        #preview-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-width: 0;
+        }
+
+        #preview-header {
+            background: #1e1e1e;
+            border-bottom: 1px solid #2e2e2e;
+            padding: 7px 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            color: #666;
+            flex-shrink: 0;
+        }
+
+        #image-info { color: #777; }
+
+        #status {
+            margin-left: auto;
+            font-size: 12px;
+            color: #666;
+            transition: color 0.2s;
+        }
+        #status.busy { color: #4d8fc9; }
+        #status.error { color: #c05050; }
+
+        #preview-wrap {
+            flex: 1;
+            overflow: auto;
+            padding: 16px;
+            background: #0f0f0f;
+            display: flex;
+            align-items: flex-start;
+        }
+
+        #placeholder {
+            margin: auto;
+            color: #333;
+            font-size: 15px;
+            pointer-events: none;
+        }
+
+        #preview {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 10px;
+            line-height: 1.15;
+            white-space: pre;
+            color: #ccc;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div id="controls">
+    <h1>Image → ASCII</h1>
+
+    <!-- Upload -->
+    <div class="section">
+        <div class="section-title">Image</div>
+        <div id="upload-area" onclick="document.getElementById('file-input').click()"
+             ondragover="onDragOver(event)" ondragleave="onDragLeave()" ondrop="onDrop(event)">
+            <div id="upload-label">Click or drag an image here</div>
+        </div>
+        <input type="file" id="file-input" accept="image/*">
+    </div>
+
+    <!-- Output settings -->
+    <div class="section">
+        <div class="section-title">Output</div>
+
+        <label class="slider-label">
+            <div class="slider-row">
+                <span>Width</span>
+                <span class="slider-val" id="width-val">80</span>
+            </div>
+            <input type="range" id="width" min="20" max="200" step="1" value="80">
+        </label>
+
+        <label class="slider-label">
+            Char set
+            <select id="chars">
+                <option value="standard">Standard (70 chars)</option>
+                <option value="dense">Dense (10 chars)</option>
+                <option value="block">Block (░▒▓█)</option>
+                <option value="minimal">Minimal (6 chars)</option>
+            </select>
+        </label>
+    </div>
+
+    <!-- Adjustments -->
+    <div class="section">
+        <div class="section-title">Adjustments</div>
+
+        <label class="slider-label">
+            <div class="slider-row">
+                <span>Sharpen</span>
+                <span class="slider-val" id="sharpen-val">1.0</span>
+            </div>
+            <input type="range" id="sharpen" min="0.5" max="5.0" step="0.1" value="1.0">
+        </label>
+
+        <label class="slider-label">
+            <div class="slider-row">
+                <span>Gamma</span>
+                <span class="slider-val" id="gamma-val">1.0</span>
+            </div>
+            <input type="range" id="gamma" min="0.2" max="3.0" step="0.1" value="1.0">
+        </label>
+
+        <label class="check-row">
+            <input type="checkbox" id="contrast">
+            Auto contrast
+        </label>
+        <label class="check-row">
+            <input type="checkbox" id="invert">
+            Invert
+        </label>
+        <label class="check-row">
+            <input type="checkbox" id="dither">
+            Dither (Floyd-Steinberg)
+        </label>
+        <label class="check-row">
+            <input type="checkbox" id="color">
+            Colour output
+        </label>
+        <label class="check-row">
+            <input type="checkbox" id="isolate">
+            Remove background
+            <span class="note">(slow)</span>
+        </label>
+    </div>
+
+    <!-- Save -->
+    <div style="margin-top: auto;">
+        <button class="btn btn-save" id="save-btn" disabled>Save as .txt</button>
+    </div>
+</div>
+
+<!-- Preview -->
+<div id="preview-panel">
+    <div id="preview-header">
+        <span id="image-info">No image loaded</span>
+        <span id="status"></span>
+    </div>
+    <div id="preview-wrap">
+        <div id="placeholder">Upload an image to get started</div>
+        <pre id="preview"></pre>
+    </div>
+</div>
+
+<script>
+    let sessionId = null;
+    let debounceTimer = null;
+
+    // ── Drag-and-drop ──────────────────────────────────────────────────────
+    function onDragOver(e) {
+        e.preventDefault();
+        document.getElementById('upload-area').classList.add('dragover');
+    }
+    function onDragLeave() {
+        document.getElementById('upload-area').classList.remove('dragover');
+    }
+    function onDrop(e) {
+        e.preventDefault();
+        document.getElementById('upload-area').classList.remove('dragover');
+        const file = e.dataTransfer.files[0];
+        if (file) handleFile(file);
+    }
+
+    document.getElementById('file-input').addEventListener('change', e => {
+        if (e.target.files[0]) handleFile(e.target.files[0]);
+    });
+
+    // ── Upload ─────────────────────────────────────────────────────────────
+    async function handleFile(file) {
+        if (file.size > 10 * 1024 * 1024) {
+            setStatus('File too large (max 10 MB)', 'error');
+            return;
+        }
+        setStatus('Uploading…', 'busy');
+        const formData = new FormData();
+        formData.append('image', file);
+        try {
+            const res = await fetch('/upload', { method: 'POST', body: formData });
+            if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+            const data = await res.json();
+            sessionId = data.session_id;
+            document.getElementById('image-info').textContent =
+                `${data.filename}  —  ${data.width}×${data.height}px`;
+            const area = document.getElementById('upload-area');
+            area.classList.add('has-file');
+            document.getElementById('upload-label').textContent = file.name;
+            document.getElementById('save-btn').disabled = false;
+            setStatus('');
+            scheduleRender(0);
+        } catch (err) {
+            setStatus('Upload failed: ' + err.message, 'error');
+        }
+    }
+
+    // ── Slider value labels ────────────────────────────────────────────────
+    ['width', 'sharpen', 'gamma'].forEach(id => {
+        const input = document.getElementById(id);
+        const label = document.getElementById(id + '-val');
+        input.addEventListener('input', () => {
+            label.textContent = id === 'width'
+                ? input.value
+                : parseFloat(input.value).toFixed(1);
+        });
+    });
+
+    // ── Wire all controls to debounced render ──────────────────────────────
+    document.querySelectorAll('#controls input, #controls select').forEach(el => {
+        el.addEventListener('input',  () => scheduleRender(300));
+        el.addEventListener('change', () => scheduleRender(300));
+    });
+
+    function scheduleRender(delay = 300) {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(doRender, delay);
+    }
+
+    // ── Render ─────────────────────────────────────────────────────────────
+    async function doRender() {
+        if (!sessionId) return;
+
+        const payload = {
+            session_id: sessionId,
+            width:    parseInt(document.getElementById('width').value),
+            chars:    document.getElementById('chars').value,
+            invert:   document.getElementById('invert').checked,
+            color:    document.getElementById('color').checked,
+            contrast: document.getElementById('contrast').checked,
+            sharpen:  parseFloat(document.getElementById('sharpen').value),
+            gamma:    parseFloat(document.getElementById('gamma').value),
+            dither:   document.getElementById('dither').checked,
+            isolate:  document.getElementById('isolate').checked,
+        };
+
+        setStatus('Rendering…', 'busy');
+        try {
+            const res = await fetch('/render', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+            const data = await res.json();
+
+            const pre = document.getElementById('preview');
+            pre.innerHTML = data.html;
+            pre.style.display = 'block';
+            document.getElementById('placeholder').style.display = 'none';
+            setStatus('');
+        } catch (err) {
+            setStatus(err.message, 'error');
+        }
+    }
+
+    // ── Save ───────────────────────────────────────────────────────────────
+    document.getElementById('save-btn').addEventListener('click', () => {
+        if (sessionId) window.location.href = '/download?session_id=' + sessionId;
+    });
+
+    // ── Status helper ──────────────────────────────────────────────────────
+    function setStatus(msg, type = '') {
+        const el = document.getElementById('status');
+        el.textContent = msg;
+        el.className = type;
+    }
+</script>
+</body>
+</html>
