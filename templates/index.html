@@ -19,15 +19,15 @@
 
         /* ── Controls panel ── */
         #controls {
-            width: 260px;
-            min-width: 260px;
+            width: 270px;
+            min-width: 270px;
             background: #222;
             border-right: 1px solid #2e2e2e;
             padding: 16px 14px;
             overflow-y: auto;
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 18px;
         }
 
         #controls h1 {
@@ -45,6 +45,8 @@
             text-transform: uppercase;
             letter-spacing: 0.1em;
             color: #555;
+            padding-bottom: 2px;
+            border-bottom: 1px solid #2a2a2a;
         }
 
         /* Upload drop zone */
@@ -84,33 +86,32 @@
             justify-content: space-between;
             align-items: baseline;
         }
-        .slider-row span { font-size: 13px; }
         .slider-val {
             font-size: 12px;
-            color: #777;
+            color: #666;
             font-variant-numeric: tabular-nums;
-            min-width: 32px;
+            min-width: 34px;
             text-align: right;
         }
         input[type="range"] {
             width: 100%;
             accent-color: #4d8fc9;
             cursor: pointer;
-            height: 4px;
         }
 
         /* Select */
-        select {
+        select, input[type="text"] {
             background: #2c2c2c;
             color: #ddd;
             border: 1px solid #3a3a3a;
             border-radius: 4px;
             padding: 5px 8px;
             font-size: 13px;
-            cursor: pointer;
             width: 100%;
         }
-        select:focus { outline: none; border-color: #4d8fc9; }
+        select { cursor: pointer; }
+        select:focus, input[type="text"]:focus { outline: none; border-color: #4d8fc9; }
+        input[type="text"]::placeholder { color: #555; }
 
         /* Checkboxes */
         .check-row {
@@ -129,31 +130,30 @@
             cursor: pointer;
             flex-shrink: 0;
         }
-        .check-row .note {
-            color: #555;
-            font-size: 11px;
-        }
+        .check-row .note { color: #555; font-size: 11px; }
 
         /* Buttons */
+        .btn-row {
+            display: flex;
+            gap: 6px;
+        }
         .btn {
+            flex: 1;
             background: #2c2c2c;
             color: #ddd;
             border: 1px solid #3a3a3a;
             border-radius: 4px;
-            padding: 7px 12px;
-            font-size: 13px;
+            padding: 7px 8px;
+            font-size: 12px;
             cursor: pointer;
             transition: background 0.12s, border-color 0.12s;
-            width: 100%;
+            text-align: center;
+            white-space: nowrap;
         }
         .btn:hover:not(:disabled) { background: #363636; border-color: #4a4a4a; }
         .btn:disabled { opacity: 0.35; cursor: default; }
-        .btn-save {
-            background: #1e4a72;
-            border-color: #2a65a0;
-            color: #c8dff2;
-        }
-        .btn-save:hover:not(:disabled) { background: #235585; }
+        .btn-primary { background: #1e4a72; border-color: #2a65a0; color: #c8dff2; }
+        .btn-primary:hover:not(:disabled) { background: #235585; }
 
         /* ── Preview panel ── */
         #preview-panel {
@@ -182,9 +182,8 @@
             margin-left: auto;
             font-size: 12px;
             color: #666;
-            transition: color 0.2s;
         }
-        #status.busy { color: #4d8fc9; }
+        #status.busy  { color: #4d8fc9; }
         #status.error { color: #c05050; }
 
         #preview-wrap {
@@ -198,14 +197,13 @@
 
         #placeholder {
             margin: auto;
-            color: #333;
+            color: #2e2e2e;
             font-size: 15px;
             pointer-events: none;
         }
 
         #preview {
             font-family: 'Courier New', Courier, monospace;
-            font-size: 10px;
             line-height: 1.15;
             white-space: pre;
             color: #ccc;
@@ -249,6 +247,10 @@
                 <option value="minimal">Minimal (6 chars)</option>
             </select>
         </label>
+
+        <label class="slider-label">
+            <input type="text" id="custom-chars" placeholder="Custom chars, light→dark  e.g.  ' .:-+#@'">
+        </label>
     </div>
 
     <!-- Adjustments -->
@@ -271,32 +273,59 @@
             <input type="range" id="gamma" min="0.2" max="3.0" step="0.1" value="1.0">
         </label>
 
+        <label class="slider-label">
+            <div class="slider-row">
+                <span>Edge strength</span>
+                <span class="slider-val" id="edge-strength-val">0.00</span>
+            </div>
+            <input type="range" id="edge-strength" min="0.00" max="0.50" step="0.01" value="0.00">
+        </label>
+
+        <label class="slider-label">
+            <div class="slider-row">
+                <span>Aspect ratio</span>
+                <span class="slider-val" id="aspect-val">0.45</span>
+            </div>
+            <input type="range" id="aspect" min="0.35" max="0.65" step="0.01" value="0.45">
+        </label>
+
         <label class="check-row">
-            <input type="checkbox" id="contrast">
-            Auto contrast
+            <input type="checkbox" id="contrast"> Auto contrast
         </label>
         <label class="check-row">
-            <input type="checkbox" id="invert">
-            Invert
+            <input type="checkbox" id="invert"> Invert
         </label>
         <label class="check-row">
-            <input type="checkbox" id="dither">
-            Dither (Floyd-Steinberg)
+            <input type="checkbox" id="dither"> Dither (Floyd-Steinberg)
         </label>
         <label class="check-row">
-            <input type="checkbox" id="color">
-            Colour output
+            <input type="checkbox" id="color"> Colour output
         </label>
         <label class="check-row">
             <input type="checkbox" id="isolate">
-            Remove background
-            <span class="note">(slow)</span>
+            Remove background <span class="note">(slow)</span>
         </label>
     </div>
 
-    <!-- Save -->
-    <div style="margin-top: auto;">
-        <button class="btn btn-save" id="save-btn" disabled>Save as .txt</button>
+    <!-- Display (client-side only, no re-render) -->
+    <div class="section">
+        <div class="section-title">Display</div>
+        <label class="slider-label">
+            <div class="slider-row">
+                <span>Font size</span>
+                <span class="slider-val" id="font-size-val">10px</span>
+            </div>
+            <input type="range" id="font-size" min="6" max="18" step="1" value="10">
+        </label>
+    </div>
+
+    <!-- Actions -->
+    <div class="section" style="margin-top: auto;">
+        <button class="btn" id="copy-btn" disabled>Copy to clipboard</button>
+        <div class="btn-row">
+            <button class="btn btn-primary" id="save-txt-btn" disabled>Save .txt</button>
+            <button class="btn btn-primary" id="save-html-btn" disabled>Save .html</button>
+        </div>
     </div>
 </div>
 
@@ -315,6 +344,7 @@
 <script>
     let sessionId = null;
     let debounceTimer = null;
+    let abortController = null;   // cancels any in-flight /render request
 
     // ── Drag-and-drop ──────────────────────────────────────────────────────
     function onDragOver(e) {
@@ -351,10 +381,9 @@
             sessionId = data.session_id;
             document.getElementById('image-info').textContent =
                 `${data.filename}  —  ${data.width}×${data.height}px`;
-            const area = document.getElementById('upload-area');
-            area.classList.add('has-file');
+            document.getElementById('upload-area').classList.add('has-file');
             document.getElementById('upload-label').textContent = file.name;
-            document.getElementById('save-btn').disabled = false;
+            setButtonsEnabled(true);
             setStatus('');
             scheduleRender(0);
         } catch (err) {
@@ -362,19 +391,45 @@
         }
     }
 
+    function setButtonsEnabled(on) {
+        ['copy-btn', 'save-txt-btn', 'save-html-btn'].forEach(id => {
+            document.getElementById(id).disabled = !on;
+        });
+    }
+
     // ── Slider value labels ────────────────────────────────────────────────
-    ['width', 'sharpen', 'gamma'].forEach(id => {
+    const sliderConfig = {
+        'width':         { decimals: 0, suffix: '' },
+        'sharpen':       { decimals: 1, suffix: '' },
+        'gamma':         { decimals: 1, suffix: '' },
+        'edge-strength': { decimals: 2, suffix: '' },
+        'aspect':        { decimals: 2, suffix: '' },
+    };
+
+    Object.entries(sliderConfig).forEach(([id, cfg]) => {
         const input = document.getElementById(id);
         const label = document.getElementById(id + '-val');
         input.addEventListener('input', () => {
-            label.textContent = id === 'width'
-                ? input.value
-                : parseFloat(input.value).toFixed(1);
+            label.textContent = parseFloat(input.value).toFixed(cfg.decimals) + cfg.suffix;
         });
     });
 
-    // ── Wire all controls to debounced render ──────────────────────────────
-    document.querySelectorAll('#controls input, #controls select').forEach(el => {
+    // Font size slider — client-side only, no server call
+    document.getElementById('font-size').addEventListener('input', function () {
+        const size = this.value;
+        document.getElementById('font-size-val').textContent = size + 'px';
+        document.getElementById('preview').style.fontSize = size + 'px';
+    });
+
+    // ── Wire render controls to debounced render ───────────────────────────
+    // Exclude font-size (client-side) and file-input (handled by handleFile)
+    const renderInputIds = [
+        'width', 'chars', 'custom-chars', 'sharpen', 'gamma',
+        'edge-strength', 'aspect', 'contrast', 'invert', 'dither',
+        'color', 'isolate',
+    ];
+    renderInputIds.forEach(id => {
+        const el = document.getElementById(id);
         el.addEventListener('input',  () => scheduleRender(300));
         el.addEventListener('change', () => scheduleRender(300));
     });
@@ -388,17 +443,24 @@
     async function doRender() {
         if (!sessionId) return;
 
+        // Abort any previous in-flight request to avoid stale results
+        if (abortController) abortController.abort();
+        abortController = new AbortController();
+
+        const customChars = document.getElementById('custom-chars').value.trim();
         const payload = {
-            session_id: sessionId,
-            width:    parseInt(document.getElementById('width').value),
-            chars:    document.getElementById('chars').value,
-            invert:   document.getElementById('invert').checked,
-            color:    document.getElementById('color').checked,
-            contrast: document.getElementById('contrast').checked,
-            sharpen:  parseFloat(document.getElementById('sharpen').value),
-            gamma:    parseFloat(document.getElementById('gamma').value),
-            dither:   document.getElementById('dither').checked,
-            isolate:  document.getElementById('isolate').checked,
+            session_id:    sessionId,
+            width:         parseInt(document.getElementById('width').value),
+            chars:         customChars || document.getElementById('chars').value,
+            invert:        document.getElementById('invert').checked,
+            color:         document.getElementById('color').checked,
+            contrast:      document.getElementById('contrast').checked,
+            sharpen:       parseFloat(document.getElementById('sharpen').value),
+            gamma:         parseFloat(document.getElementById('gamma').value),
+            dither:        document.getElementById('dither').checked,
+            isolate:       document.getElementById('isolate').checked,
+            edge_strength: parseFloat(document.getElementById('edge-strength').value),
+            aspect:        parseFloat(document.getElementById('aspect').value),
         };
 
         setStatus('Rendering…', 'busy');
@@ -407,6 +469,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
+                signal: abortController.signal,
             });
             if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
             const data = await res.json();
@@ -417,13 +480,26 @@
             document.getElementById('placeholder').style.display = 'none';
             setStatus('');
         } catch (err) {
+            if (err.name === 'AbortError') return;   // superseded by a newer request
             setStatus(err.message, 'error');
         }
     }
 
+    // ── Copy to clipboard ──────────────────────────────────────────────────
+    document.getElementById('copy-btn').addEventListener('click', () => {
+        const text = document.getElementById('preview').innerText;
+        navigator.clipboard.writeText(text).then(() => {
+            setStatus('Copied!');
+            setTimeout(() => setStatus(''), 1500);
+        }).catch(() => setStatus('Copy failed', 'error'));
+    });
+
     // ── Save ───────────────────────────────────────────────────────────────
-    document.getElementById('save-btn').addEventListener('click', () => {
-        if (sessionId) window.location.href = '/download?session_id=' + sessionId;
+    document.getElementById('save-txt-btn').addEventListener('click', () => {
+        if (sessionId) window.location.href = `/download?session_id=${sessionId}&format=txt`;
+    });
+    document.getElementById('save-html-btn').addEventListener('click', () => {
+        if (sessionId) window.location.href = `/download?session_id=${sessionId}&format=html`;
     });
 
     // ── Status helper ──────────────────────────────────────────────────────

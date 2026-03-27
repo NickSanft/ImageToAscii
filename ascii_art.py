@@ -8,13 +8,14 @@ Usage:
     python ascii_art.py <image> [options]
 
 Requirements (Python 3.12):
-    pip install Pillow rembg
-    pip install numpy  # optional, required for --dither
+    pip install Pillow rembg numpy
+    scipy is used for --edge-strength (installed automatically with rembg)
 """
 
 import argparse
-import sys
+import html as html_module
 import re
+import sys
 from pathlib import Path
 
 
@@ -26,6 +27,54 @@ CHAR_SETS = {
     "minimal":   ' .:+#@',
 }
 
+# ── ANSI → HTML ──────────────────────────────────────────────────────────────
+
+_ANSI_RE = re.compile(r"(\x1b\[[0-9;]*m)")
+
+
+def ansi_to_html(text: str) -> str:
+    """Convert ANSI 24-bit colour escapes to HTML <span> elements."""
+    parts = _ANSI_RE.split(text)
+    out: list[str] = []
+    open_span = False
+    for part in parts:
+        if part.startswith("\x1b["):
+            codes = part[2:-1]
+            if codes in ("0", ""):
+                if open_span:
+                    out.append("</span>")
+                    open_span = False
+            elif codes.startswith("38;2;"):
+                if open_span:
+                    out.append("</span>")
+                r, g, b = codes[5:].split(";")
+                out.append(f'<span style="color:rgb({r},{g},{b})">')
+                open_span = True
+        else:
+            out.append(html_module.escape(part))
+    if open_span:
+        out.append("</span>")
+    return "".join(out)
+
+
+def ascii_to_html_document(ascii_text: str) -> str:
+    """Wrap ASCII art in a self-contained HTML document, preserving ANSI colour."""
+    body = ansi_to_html(ascii_text)
+    css = (
+        "body { background: #0f0f0f; margin: 0; padding: 16px; }\n"
+        "pre  { font-family: 'Courier New', Courier, monospace;\n"
+        "       font-size: 12px; line-height: 1.15;\n"
+        "       color: #cccccc; white-space: pre; }"
+    )
+    return (
+        f'<!DOCTYPE html>\n<html lang="en">\n<head>\n'
+        f'<meta charset="utf-8">\n<title>ASCII Art</title>\n'
+        f'<style>\n{css}\n</style>\n'
+        f'</head>\n<body><pre>{body}</pre></body>\n</html>\n'
+    )
+
+
+# ── Image loading and processing ─────────────────────────────────────────────
 
 def load_image(path: str):
     """Load an image from disk."""
@@ -46,13 +95,12 @@ def load_image(path: str):
 def remove_background(img):
     """
     Remove the background from an image using rembg.
-    Returns an RGBA image; transparent pixels become white.
+    Returns an RGB image with transparent areas composited onto white.
     """
     try:
         from rembg import remove as rembg_remove
         print("Removing background (first run downloads model ~170 MB)...", file=sys.stderr)
-        result = rembg_remove(img)  # returns RGBA
-        # Composite onto white so transparent areas read as light in grayscale
+        result = rembg_remove(img)
         from PIL import Image
         white = Image.new("RGBA", result.size, (255, 255, 255, 255))
         white.paste(result, mask=result.split()[3])
@@ -66,6 +114,8 @@ def remove_background(img):
         return img
 
 
+# ── Core conversion ───────────────────────────────────────────────────────────
+
 def image_to_ascii(
     img,
     width: int = 80,
@@ -76,32 +126,44 @@ def image_to_ascii(
     sharpen: float = 1.0,
     gamma: float = 1.0,
     dither: bool = False,
+    edge_strength: float = 0.0,
+    aspect: float = 0.45,
 ) -> str:
     """
     Convert a PIL image to an ASCII string.
 
     Args:
-        img:       PIL Image (RGB or RGBA)
-        width:     number of characters per line
-        char_set:  key into CHAR_SETS
-        invert:    invert brightness (useful for dark subjects on white bg)
-        color:     wrap each character in ANSI 24-bit color escape codes
-        contrast:  auto-stretch the grayscale histogram for maximum tonal range
-        sharpen:   sharpness multiplier applied after resize (1.0 = no change)
-        gamma:     brightness gamma before char mapping (< 1.0 = brighter midtones)
-        dither:    use Floyd-Steinberg dithering to simulate intermediate tones
+        img:            PIL Image (RGB or RGBA)
+        width:          number of characters per line
+        char_set:       preset name (key in CHAR_SETS) or a custom string ordered light→dark
+        invert:         invert brightness mapping
+        color:          wrap each character in ANSI 24-bit colour escape codes
+        contrast:       auto-stretch the grayscale histogram for maximum tonal range
+        sharpen:        sharpness factor applied after resize (1.0 = no change)
+        gamma:          brightness gamma before char mapping (< 1.0 = brighter midtones)
+        dither:         use Floyd-Steinberg dithering to simulate intermediate tones
+        edge_strength:  fraction of pixels treated as directional edge characters (0.0 = off)
+        aspect:         height correction for terminal/font character aspect ratio
 
     Returns:
         Multi-line ASCII string (with ANSI codes if color=True)
     """
+    import numpy as np
     from PIL import Image, ImageEnhance, ImageOps
 
-    chars = CHAR_SETS.get(char_set, CHAR_SETS["standard"])
+    # Resolve char set: preset name or literal string
+    if char_set in CHAR_SETS:
+        chars = CHAR_SETS[char_set]
+    elif len(char_set) >= 2:
+        chars = char_set
+    else:
+        chars = CHAR_SETS["standard"]
 
-    # Resize: terminal characters are ~0.5 wide as they are tall,
-    # so we scale height down to keep proportions correct.
-    aspect = img.height / img.width
-    height = max(1, int(width * aspect * 0.45))
+    n = len(chars) - 1
+
+    # Resize with aspect-ratio correction
+    img_aspect = img.height / img.width
+    height = max(1, int(width * img_aspect * aspect))
     img_resized = img.resize((width, height), Image.LANCZOS)
 
     # Sharpen after resize to recover edge detail lost during downscaling
@@ -111,71 +173,109 @@ def image_to_ascii(
     rgb = img_resized.convert("RGB")
     gray = img_resized.convert("L")
 
-    # Stretch histogram so the full character range is used
     if contrast:
         gray = ImageOps.autocontrast(gray, cutoff=2)
-
     if invert:
         gray = ImageOps.invert(gray)
 
-    n = len(chars) - 1
+    gray_np = np.array(gray, dtype=np.float32)
 
-    # Floyd-Steinberg dithering — distributes quantization error to neighbours,
-    # giving the illusion of more tones than the character set can represent.
-    if dither:
+    # ── Edge detection overlay ────────────────────────────────────────────
+    # Uses Sobel gradients to find edge magnitude and direction, then
+    # replaces the top `edge_strength` fraction of pixels with directional
+    # characters (|, \, -, /) that follow the local edge angle.
+    edge_mask = None
+    edge_dir_chars = None
+    if edge_strength > 0.0:
         try:
-            import numpy as np
-            gray_arr = np.array(gray, dtype=float)
-            lines = []
-            for y in range(height):
-                row = []
-                for x in range(width):
-                    val = float(np.clip(gray_arr[y, x], 0, 255))
-                    normalized = (val / 255.0) ** gamma
-                    idx = max(0, min(n, int(normalized * n)))
-                    ch = chars[idx]
-                    quant_error = val - (idx / n * 255.0)
-                    if x + 1 < width:
-                        gray_arr[y, x + 1] += quant_error * 7 / 16
-                    if y + 1 < height:
-                        if x > 0:
-                            gray_arr[y + 1, x - 1] += quant_error * 3 / 16
-                        gray_arr[y + 1, x] += quant_error * 5 / 16
-                        if x + 1 < width:
-                            gray_arr[y + 1, x + 1] += quant_error * 1 / 16
-                    if color:
-                        r, g, b = rgb.getpixel((x, y))
-                        row.append(f"\033[38;2;{r};{g};{b}m{ch}")
-                    else:
-                        row.append(ch)
-                lines.append("".join(row) + "\033[0m" if color else "".join(row))
-            return "\n".join(lines)
-        except ImportError:
-            print("Warning: numpy not installed; --dither requires numpy (pip install numpy).", file=sys.stderr)
+            from scipy.ndimage import sobel
+            sx = sobel(gray_np, axis=1)  # horizontal gradient
+            sy = sobel(gray_np, axis=0)  # vertical gradient
+            magnitude = np.hypot(sx, sy)
+            threshold = np.percentile(magnitude, (1.0 - edge_strength) * 100)
+            edge_mask = magnitude >= threshold
 
-    # Standard brightness mapping with optional gamma correction
+            # Map gradient angle to the perpendicular edge character.
+            # angle % 180 bins → ['|', '\', '-', '/', '|']
+            angle_mod = np.degrees(np.arctan2(sy, sx)) % 180
+            dir_idx = np.digitize(angle_mod, [22.5, 67.5, 112.5, 157.5])
+            edge_dir_chars = np.array(['|', '\\', '-', '/', '|'])[dir_idx]
+        except ImportError:
+            print(
+                "Warning: scipy not installed; --edge-strength requires scipy "
+                "(pip install scipy).",
+                file=sys.stderr,
+            )
+
+    # ── Floyd-Steinberg dithering (sequential by nature) ─────────────────
+    if dither:
+        gray_arr = gray_np.copy().astype(float)
+        rgb_np = np.array(rgb) if color else None
+        lines = []
+        for y in range(height):
+            row = []
+            for x in range(width):
+                val = float(np.clip(gray_arr[y, x], 0, 255))
+                normalized = (val / 255.0) ** gamma if gamma != 1.0 else val / 255.0
+                idx = max(0, min(n, int(normalized * n)))
+
+                if edge_mask is not None and bool(edge_mask[y, x]):
+                    ch = str(edge_dir_chars[y, x])
+                else:
+                    ch = chars[idx]
+
+                quant_error = val - (idx / n * 255.0)
+                if x + 1 < width:
+                    gray_arr[y, x + 1] += quant_error * 7 / 16
+                if y + 1 < height:
+                    if x > 0:
+                        gray_arr[y + 1, x - 1] += quant_error * 3 / 16
+                    gray_arr[y + 1, x] += quant_error * 5 / 16
+                    if x + 1 < width:
+                        gray_arr[y + 1, x + 1] += quant_error * 1 / 16
+
+                if color:
+                    r, g_val, b_val = rgb_np[y, x]
+                    row.append(f"\033[38;2;{r};{g_val};{b_val}m{ch}")
+                else:
+                    row.append(ch)
+            lines.append("".join(row) + "\033[0m" if color else "".join(row))
+        return "\n".join(lines)
+
+    # ── Vectorised brightness mapping ─────────────────────────────────────
+    normalized = gray_np / 255.0
+    if gamma != 1.0:
+        normalized = np.power(normalized, gamma)
+    idx_arr = np.clip((normalized * n).astype(np.int32), 0, n)
+
+    chars_arr = np.array(list(chars))
+    char_grid = chars_arr[idx_arr]  # (height, width) array of characters
+
+    if edge_mask is not None:
+        char_grid = np.where(edge_mask, edge_dir_chars, char_grid)
+
+    if not color:
+        return "\n".join("".join(row) for row in char_grid)
+
+    # Colour mode: one ANSI escape per character
+    rgb_np = np.array(rgb)
     lines = []
     for y in range(height):
         row = []
         for x in range(width):
-            brightness = gray.getpixel((x, y))
-            normalized = (brightness / 255.0) ** gamma
-            idx = max(0, min(n, int(normalized * n)))
-            ch = chars[idx]
-            if color:
-                r, g, b = rgb.getpixel((x, y))
-                row.append(f"\033[38;2;{r};{g};{b}m{ch}")
-            else:
-                row.append(ch)
-        lines.append("".join(row) + "\033[0m" if color else "".join(row))
-
+            ch = char_grid[y, x]
+            r, g_val, b_val = rgb_np[y, x]
+            row.append(f"\033[38;2;{r};{g_val};{b_val}m{ch}")
+        lines.append("".join(row) + "\033[0m")
     return "\n".join(lines)
 
 
 def strip_ansi(text: str) -> str:
-    """Remove ANSI escape codes from a string (for saving to file)."""
+    """Remove ANSI escape codes from a string (for saving as plain text)."""
     return re.sub(r"\033\[[0-9;]*m", "", text)
 
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
@@ -195,9 +295,11 @@ def main():
     )
     parser.add_argument(
         "--chars", "-c",
-        choices=list(CHAR_SETS.keys()),
         default="standard",
-        help="Character set to use (default: standard)",
+        help=(
+            "Character set: standard, dense, block, minimal, "
+            "or a custom string ordered light→dark (e.g. ' .:-+#@')"
+        ),
     )
     parser.add_argument(
         "--invert",
@@ -207,12 +309,12 @@ def main():
     parser.add_argument(
         "--color",
         action="store_true",
-        help="Use ANSI 24-bit color codes in terminal output",
+        help="Use ANSI 24-bit colour codes in terminal output",
     )
     parser.add_argument(
         "--contrast",
         action="store_true",
-        help="Auto-stretch the grayscale histogram to maximize tonal range",
+        help="Auto-stretch the grayscale histogram to maximise tonal range",
     )
     parser.add_argument(
         "--sharpen",
@@ -226,16 +328,40 @@ def main():
         type=float,
         default=1.0,
         metavar="GAMMA",
-        help="Brightness gamma before char mapping (< 1.0 brightens midtones, > 1.0 darkens; default: 1.0)",
+        help="Brightness gamma (< 1.0 brightens midtones, > 1.0 darkens; default: 1.0)",
     )
     parser.add_argument(
         "--dither",
         action="store_true",
-        help="Apply Floyd-Steinberg dithering for smoother tonal gradients (requires numpy)",
+        help="Apply Floyd-Steinberg dithering for smoother tonal gradients",
+    )
+    parser.add_argument(
+        "--edge-strength",
+        type=float,
+        default=0.0,
+        metavar="STRENGTH",
+        dest="edge_strength",
+        help=(
+            "Fraction of pixels rendered as directional edge characters "
+            "(0.0 = off, 0.1–0.3 recommended; requires scipy)"
+        ),
+    )
+    parser.add_argument(
+        "--aspect",
+        type=float,
+        default=0.45,
+        metavar="RATIO",
+        help=(
+            "Height correction for terminal character aspect ratio "
+            "(default: 0.45; typical range 0.40–0.55)"
+        ),
     )
     parser.add_argument(
         "--output", "-o",
-        help="Save ASCII art to file (ANSI codes stripped automatically)",
+        help=(
+            "Save output to a file. Use .txt for plain text or "
+            ".html for a colour-preserving standalone HTML file."
+        ),
     )
     args = parser.parse_args()
 
@@ -256,17 +382,21 @@ def main():
         sharpen=args.sharpen,
         gamma=args.gamma,
         dither=args.dither,
+        edge_strength=args.edge_strength,
+        aspect=args.aspect,
     )
 
-    # Print to terminal
     print(ascii_art)
 
-    # Save to file if requested
     if args.output:
         out_path = Path(args.output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(strip_ansi(ascii_art))
+        if out_path.suffix.lower() == ".html":
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(ascii_to_html_document(ascii_art), encoding="utf-8")
+        else:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(strip_ansi(ascii_art))
         print(f"Saved to: {args.output}", file=sys.stderr)
 
 
